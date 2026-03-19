@@ -3,5 +3,5 @@
  */
 export const SERVER_CONFIG = {
   name: "ssh-mcp-server",
-  version: "1.3.0",
+  version: "1.4.0",
 };
