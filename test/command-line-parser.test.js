@@ -274,6 +274,94 @@ Host testhost
       assert.strictEqual(result.configs.default.socksProxy, 'socks://proxy:1080');
     });
 
+    it('应该正确解析配置文件中的 jumpHost', () => {
+      const jumpConfigPath = path.join(__dirname, 'fixtures', 'jump-config.json');
+      fs.writeFileSync(jumpConfigPath, JSON.stringify({
+        dev: {
+          host: '192.168.1.100',
+          port: 22,
+          username: 'devuser',
+          password: 'devpass',
+          jumpHost: {
+            host: '10.0.0.10',
+            port: 22,
+            username: 'jumpuser',
+            password: 'jumppass'
+          }
+        }
+      }));
+
+      process.argv = ['node', 'test', '--config-file', jumpConfigPath];
+      const result = CommandLineParser.parseArgs();
+
+      assert.strictEqual(result.configs.dev.jumpHost.host, '10.0.0.10');
+      assert.strictEqual(result.configs.dev.jumpHost.username, 'jumpuser');
+
+      fs.unlinkSync(jumpConfigPath);
+    });
+
+    it('应该正确解析命令行 jump host 参数', () => {
+      process.argv = [
+        'node', 'test',
+        '--host', '1.2.3.4',
+        '--port', '22',
+        '--username', 'user',
+        '--password', 'pass',
+        '--jump-host', '10.0.0.10',
+        '--jump-port', '22',
+        '--jump-username', 'jumpuser',
+        '--jump-password', 'jumppass'
+      ];
+      const result = CommandLineParser.parseArgs();
+
+      assert.strictEqual(result.configs.default.jumpHost.host, '10.0.0.10');
+      assert.strictEqual(result.configs.default.jumpHost.password, 'jumppass');
+    });
+
+    it('应该正确解析命令行 root 提权参数', () => {
+      process.argv = [
+        'node', 'test',
+        '--host', '1.2.3.4',
+        '--port', '22',
+        '--username', 'paas',
+        '--password', 'paas-pass',
+        '--root-password', 'root-pass',
+        '--root-method', 'sudo',
+        '--root-user', 'root'
+      ];
+      const result = CommandLineParser.parseArgs();
+
+      assert.strictEqual(result.configs.default.privilegeEscalation.password, 'root-pass');
+      assert.strictEqual(result.configs.default.privilegeEscalation.method, 'sudo');
+      assert.strictEqual(result.configs.default.privilegeEscalation.targetUser, 'root');
+    });
+
+    it('应该正确解析配置文件中的 privilegeEscalation', () => {
+      const privilegeConfigPath = path.join(__dirname, 'fixtures', 'privilege-config.json');
+      fs.writeFileSync(privilegeConfigPath, JSON.stringify({
+        dev: {
+          host: '192.168.1.100',
+          port: 22,
+          username: 'paas',
+          password: 'paas-pass',
+          privilegeEscalation: {
+            method: 'su',
+            targetUser: 'root',
+            password: 'root-pass'
+          }
+        }
+      }));
+
+      process.argv = ['node', 'test', '--config-file', privilegeConfigPath];
+      const result = CommandLineParser.parseArgs();
+
+      assert.strictEqual(result.configs.dev.privilegeEscalation.method, 'su');
+      assert.strictEqual(result.configs.dev.privilegeEscalation.targetUser, 'root');
+      assert.strictEqual(result.configs.dev.privilegeEscalation.password, 'root-pass');
+
+      fs.unlinkSync(privilegeConfigPath);
+    });
+
     it('应该正确解析 allowed local paths', () => {
       process.argv = ['node', 'test', '--host', '1.2.3.4', '--port', '22', '--username', 'user', '--password', 'pass', '--allowed-local-paths', './tmp,../ssh-mcp-server/test'];
       const result = CommandLineParser.parseArgs();
