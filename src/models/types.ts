@@ -11,9 +11,16 @@ export interface SSHHopConfig {
   agent?: string; // SSH agent for authentication (use 'pageant' for Windows Pageant)
 }
 
+export interface PrivilegeEscalationConfig {
+  method?: "sudo" | "su"; // Privilege escalation method, default: sudo
+  targetUser?: string; // User to escalate to, default: root
+  password?: string; // Password used for privilege escalation
+}
+
 export interface SSHConfig extends SSHHopConfig {
   name?: string; // Connection name, optional, compatible with single connection
   jumpHost?: SSHHopConfig; // Optional jump host (bastion) for chained SSH connection
+  privilegeEscalation?: PrivilegeEscalationConfig; // Optional privilege escalation after SSH login
   commandWhitelist?: string[]; // Command whitelist (array of regex strings)
   commandBlacklist?: string[]; // Command blacklist (array of regex strings)
   socksProxy?: string; // SOCKS proxy URL, e.g. 'socks://user:pass@host:port'

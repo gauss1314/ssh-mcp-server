@@ -202,4 +202,26 @@ describe('SSH Connection Manager', () => {
       assert.strictEqual(config.host, '2.2.2.2');
     });
   });
+
+  describe('提权命令封装', () => {
+    it('应该在 sudo 模式下封装命令', () => {
+      const wrapped = manager['wrapCommandWithPrivilegeEscalation']('ls -al', {
+        method: 'sudo',
+        targetUser: 'root',
+        password: 'rootpass'
+      });
+      assert.ok(wrapped.includes("sudo -S -p '' -u root -- sh -lc"));
+      assert.ok(wrapped.includes("'ls -al'"));
+    });
+
+    it('应该在 su 模式下封装命令', () => {
+      const wrapped = manager['wrapCommandWithPrivilegeEscalation']('id', {
+        method: 'su',
+        targetUser: 'root',
+        password: 'rootpass'
+      });
+      assert.ok(wrapped.startsWith('su - root -c'));
+      assert.ok(wrapped.includes('sh -lc'));
+    });
+  });
 });

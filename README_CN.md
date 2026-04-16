@@ -67,6 +67,9 @@ NPM: [https://www.npmjs.com/package/@fangjunjie/ssh-mcp-server](https://www.npmj
   --jump-privateKey   跳板机私钥文件路径
   --jump-passphrase   跳板机私钥密码（如果有）
   --jump-agent        跳板机 SSH Agent
+  --root-password     提权（sudo/su）密码
+  --root-method       提权方式：sudo 或 su（默认 sudo）
+  --root-user         提权目标用户（默认 root）
   --allowed-local-paths upload/download 允许访问的额外本地路径，逗号分隔
   --pty               为命令执行分配伪终端 (默认: true)
   --pre-connect       启动时预连接所有配置的 SSH 服务器
@@ -217,6 +220,34 @@ Host myserver
         "--port", "22",
         "--username", "spark",
         "--password", "target-password",
+        "--jump-host", "10.0.0.5",
+        "--jump-port", "22",
+        "--jump-username", "bastion",
+        "--jump-password", "bastion-password"
+      ]
+    }
+  }
+}
+```
+
+#### 👑 通过跳板机连接后自动提权到 root
+
+> 适用于先用 `paas` 登录，再通过 `sudo` 或 `su` 提权执行命令的场景。
+
+```json
+{
+  "mcpServers": {
+    "ssh-mcp-server": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@fangjunjie/ssh-mcp-server",
+        "--host", "172.16.10.25",
+        "--port", "22",
+        "--username", "paas",
+        "--password", "paas-password",
+        "--root-password", "root-password",
+        "--root-method", "sudo",
         "--jump-host", "10.0.0.5",
         "--jump-port", "22",
         "--jump-username", "bastion",

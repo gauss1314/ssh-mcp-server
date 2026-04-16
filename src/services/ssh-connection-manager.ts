@@ -1,6 +1,7 @@
 import { Client, ClientChannel } from "ssh2";
 import { SocksClient } from "socks";
 import {
+  PrivilegeEscalationConfig,
   SSHConfig,
   SSHHopConfig,
   SshConnectionConfigMap,
@@ -454,6 +455,30 @@ export class SSHConnectionManager {
     };
   }
 
+  private shellQuote(value: string): string {
+    return `'${value.replace(/'/g, `'\"'\"'`)}'`;
+  }
+
+  private wrapCommandWithPrivilegeEscalation(
+    command: string,
+    privilegeEscalation?: PrivilegeEscalationConfig,
+  ): string {
+    if (!privilegeEscalation) {
+      return command;
+    }
+
+    const method = privilegeEscalation.method || "sudo";
+    const targetUser = privilegeEscalation.targetUser || "root";
+    const quotedCommand = this.shellQuote(command);
+
+    if (method === "su") {
+      const innerCommand = `sh -lc ${quotedCommand}`;
+      return `su - ${targetUser} -c ${this.shellQuote(innerCommand)}`;
+    }
+
+    return `sudo -S -p '' -u ${targetUser} -- sh -lc ${quotedCommand}`;
+  }
+
   private formatCommandFailure(
     stdout: string,
     stderr: string,
@@ -506,9 +531,13 @@ export class SSHConnectionManager {
     // Get configuration to check PTY setting
     const config = this.getConfig(name);
 
-    const commandToRun = directory
+    const baseCommandToRun = directory
       ? `cd -- ${JSON.stringify(directory)} && ${cmdString}`
       : cmdString;
+    const commandToRun = this.wrapCommandWithPrivilegeEscalation(
+      baseCommandToRun,
+      config.privilegeEscalation,
+    );
 
     // Configure execution options with defaults
     const timeout = options.timeout || 30000; // Default 30 seconds timeout
@@ -548,6 +577,10 @@ export class SSHConnectionManager {
           let errorData = "";
           let exitCode: number | undefined;
           let exitSignal: string | undefined;
+
+          if (config.privilegeEscalation?.password) {
+            stream.write(`${config.privilegeEscalation.password}\n`);
+          }
 
           // Set up event listeners for command output streams
           stream.on("data", (chunk: Buffer) => (data += chunk.toString())); // Collect stdout data

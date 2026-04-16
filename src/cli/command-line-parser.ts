@@ -2,6 +2,7 @@ import { parseArgs } from "node:util";
 import {
   SSHConfig,
   SSHHopConfig,
+  PrivilegeEscalationConfig,
   SshConnectionConfigMap,
   ParsedArgs,
 } from "../models/types.js";
@@ -61,6 +62,9 @@ export class CommandLineParser {
         "jump-privateKey": { type: "string" },
         "jump-passphrase": { type: "string" },
         "jump-agent": { type: "string" },
+        "root-password": { type: "string" },
+        "root-method": { type: "string" },
+        "root-user": { type: "string" },
         pty: { type: "boolean" },
         "pre-connect": { type: "boolean" },
       },
@@ -165,6 +169,7 @@ export class CommandLineParser {
       const allowedLocalPaths = values["allowed-local-paths"];
       const pty = values.pty;
       const jumpHost = this.parseJumpHostFromCli(values);
+      const privilegeEscalation = this.parsePrivilegeEscalationFromCli(values);
 
       // 实际连接地址：优先使用 SSH config 的 HostName
       const actualHost = sshConfigEntry?.hostName || host;
@@ -192,6 +197,7 @@ export class CommandLineParser {
         socksProxy: values.socksProxy,
         pty: pty !== undefined ? pty : undefined,
         jumpHost,
+        privilegeEscalation,
         commandWhitelist: whitelist
           ? whitelist
               .split(",")
@@ -255,6 +261,12 @@ export class CommandLineParser {
       privateKey: conf.privateKey,
       passphrase: conf.passphrase || process.env.SSH_MCP_PASSPHRASE,
       agent: conf.agent,
+      privilegeEscalation: this.normalizePrivilegeEscalation(
+        conf.privilegeEscalation,
+        conf.rootPassword,
+        conf.rootMethod,
+        conf.rootUser,
+      ),
       socksProxy: conf.socksProxy,
       pty: this.parseBoolean(conf.pty),
       commandWhitelist: conf.whitelist
@@ -301,6 +313,12 @@ export class CommandLineParser {
       passphrase: config.passphrase || process.env.SSH_MCP_PASSPHRASE,
       agent: config.agent,
       jumpHost: this.normalizeJumpHost(config.jumpHost),
+      privilegeEscalation: this.normalizePrivilegeEscalation(
+        config.privilegeEscalation,
+        config.rootPassword,
+        config.rootMethod,
+        config.rootUser,
+      ),
       socksProxy: config.socksProxy,
       pty: this.parseBoolean(config.pty),
       commandWhitelist: Array.isArray(config.commandWhitelist)
@@ -388,5 +406,59 @@ export class CommandLineParser {
       passphrase: values["jump-passphrase"] || process.env.SSH_MCP_PASSPHRASE,
       agent: values["jump-agent"],
     });
+  }
+
+  private static normalizePrivilegeEscalation(
+    rawPrivilegeEscalation: unknown,
+    rootPassword?: unknown,
+    rootMethod?: unknown,
+    rootUser?: unknown,
+  ): PrivilegeEscalationConfig | undefined {
+    if (!rawPrivilegeEscalation && !rootPassword) {
+      return undefined;
+    }
+
+    const privilegeEscalationSource = (
+      rawPrivilegeEscalation && typeof rawPrivilegeEscalation === "object"
+        ? rawPrivilegeEscalation
+        : {}
+    ) as Record<string, unknown>;
+
+    const methodCandidate = privilegeEscalationSource.method || rootMethod || "sudo";
+    if (methodCandidate !== "sudo" && methodCandidate !== "su") {
+      throw new Error("privilegeEscalation.method must be 'sudo' or 'su'");
+    }
+
+    const targetUser = String(
+      privilegeEscalationSource.targetUser || rootUser || "root",
+    );
+    const password = privilegeEscalationSource.password || rootPassword;
+
+    if (!password || String(password).length === 0) {
+      throw new Error(
+        "privilegeEscalation requires password (use privilegeEscalation.password or --root-password)",
+      );
+    }
+
+    return {
+      method: methodCandidate,
+      targetUser,
+      password: String(password),
+    };
+  }
+
+  private static parsePrivilegeEscalationFromCli(
+    values: Record<string, unknown>,
+  ): PrivilegeEscalationConfig | undefined {
+    if (!values["root-password"]) {
+      return undefined;
+    }
+
+    return this.normalizePrivilegeEscalation(
+      undefined,
+      values["root-password"],
+      values["root-method"],
+      values["root-user"],
+    );
   }
 }
