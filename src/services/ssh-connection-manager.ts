@@ -2,6 +2,7 @@ import { Client, ClientChannel } from "ssh2";
 import { SocksClient } from "socks";
 import {
   SSHConfig,
+  SSHHopConfig,
   SshConnectionConfigMap,
   ServerStatus,
 } from "../models/types.js";
@@ -18,6 +19,7 @@ import { SFTPWrapper } from "ssh2";
 export class SSHConnectionManager {
   private static instance: SSHConnectionManager;
   private clients: Map<string, Client> = new Map();
+  private jumpClients: Map<string, Client> = new Map();
   private configs: SshConnectionConfigMap = {};
   private connected: Map<string, boolean> = new Map();
   private statusCache: Map<string, ServerStatus> = new Map();
@@ -158,6 +160,11 @@ export class SSHConnectionManager {
         this.connected.set(key, false);
         this.clients.delete(key);
         this.pendingConnections.delete(key);
+        const jumpClient = this.jumpClients.get(key);
+        if (jumpClient) {
+          jumpClient.end();
+          this.jumpClients.delete(key);
+        }
         Logger.log(`SSH connection [${key}] closed`, "info");
       });
       const sshConfig: any = {
@@ -165,8 +172,39 @@ export class SSHConnectionManager {
         port: config.port,
         username: config.username,
       };
+
+      try {
+        this.applyAuthentication(sshConfig, config, key);
+      } catch (err) {
+        return reject(err);
+      }
+
+      // Add jump host configuration if provided
+      if (config.jumpHost) {
+        try {
+          const jumpClient = await this.connectJumpHost(config.jumpHost, key);
+          this.jumpClients.set(key, jumpClient);
+
+          const jumpSocket = await this.openJumpTunnel(
+            jumpClient,
+            config.host,
+            config.port,
+            key,
+          );
+          sshConfig.sock = jumpSocket;
+          delete sshConfig.host;
+          delete sshConfig.port;
+          Logger.log(
+            `Using jump host for [${key}] via ${config.jumpHost.host}:${config.jumpHost.port}`,
+            "info",
+          );
+        } catch (err) {
+          return reject(err);
+        }
+      }
+
       // Add SOCKS proxy configuration if provided
-      if (config.socksProxy) {
+      if (config.socksProxy && !config.jumpHost) {
         try {
           // Parse SOCKS proxy URL
           const proxyUrl = new URL(config.socksProxy);
@@ -212,42 +250,6 @@ export class SSHConnectionManager {
             ),
           );
         }
-      }
-      if (config.agent) {
-        sshConfig.agent = config.agent;
-        Logger.log(`Using SSH agent authentication for [${key}]: ${config.agent}`, "info");
-      } else if (config.privateKey) {
-        try {
-          sshConfig.privateKey = fs.readFileSync(config.privateKey, "utf8");
-          if (config.passphrase) {
-            sshConfig.passphrase = config.passphrase;
-          }
-          Logger.log(
-            `Using SSH private key authentication for [${key}]`,
-            "info",
-          );
-        } catch (err) {
-          return reject(
-            new ToolError(
-              "LOCAL_FILE_READ_FAILED",
-              `Failed to read private key file for [${key}]: ${
-                (err as Error).message
-              }`,
-              false,
-            ),
-          );
-        }
-      } else if (config.password) {
-        sshConfig.password = config.password;
-        Logger.log(`Using password authentication for [${key}]`, "info");
-      } else {
-        return reject(
-          new ToolError(
-            "SSH_AUTHENTICATION_MISSING",
-            `No valid authentication method provided for [${key}] (agent, password or private key)`,
-            false,
-          ),
-        );
       }
       client.connect(sshConfig);
     });
@@ -306,6 +308,112 @@ export class SSHConnectionManager {
           `Invalid ${kind} pattern for '${connectionName}': ${pattern} (${(error as Error).message})`,
         );
       }
+    });
+  }
+
+  private applyAuthentication(
+    sshConfig: Record<string, unknown>,
+    authConfig: SSHHopConfig,
+    connectionKey: string,
+  ): void {
+    if (authConfig.agent) {
+      sshConfig.agent = authConfig.agent;
+      Logger.log(
+        `Using SSH agent authentication for [${connectionKey}]: ${authConfig.agent}`,
+        "info",
+      );
+      return;
+    }
+
+    if (authConfig.privateKey) {
+      try {
+        sshConfig.privateKey = fs.readFileSync(authConfig.privateKey, "utf8");
+        if (authConfig.passphrase) {
+          sshConfig.passphrase = authConfig.passphrase;
+        }
+        Logger.log(
+          `Using SSH private key authentication for [${connectionKey}]`,
+          "info",
+        );
+        return;
+      } catch (err) {
+        throw new ToolError(
+          "LOCAL_FILE_READ_FAILED",
+          `Failed to read private key file for [${connectionKey}]: ${(err as Error).message}`,
+          false,
+        );
+      }
+    }
+
+    if (authConfig.password) {
+      sshConfig.password = authConfig.password;
+      Logger.log(`Using password authentication for [${connectionKey}]`, "info");
+      return;
+    }
+
+    throw new ToolError(
+      "SSH_AUTHENTICATION_MISSING",
+      `No valid authentication method provided for [${connectionKey}] (agent, password or private key)`,
+      false,
+    );
+  }
+
+  private async connectJumpHost(jumpHost: SSHHopConfig, key: string): Promise<Client> {
+    const jumpClient = new Client();
+    const jumpSshConfig: Record<string, unknown> = {
+      host: jumpHost.host,
+      port: jumpHost.port,
+      username: jumpHost.username,
+    };
+    this.applyAuthentication(jumpSshConfig, jumpHost, `${key}/jumpHost`);
+
+    await new Promise<void>((resolve, reject) => {
+      jumpClient.once("ready", resolve);
+      jumpClient.once("error", (err: Error) => {
+        reject(
+          new ToolError(
+            "SSH_CONNECTION_FAILED",
+            `Jump host SSH connection [${key}] failed: ${err.message}`,
+            true,
+          ),
+        );
+      });
+      jumpClient.connect(jumpSshConfig as any);
+    });
+
+    jumpClient.on("close", () => {
+      this.jumpClients.delete(key);
+    });
+
+    return jumpClient;
+  }
+
+  private async openJumpTunnel(
+    jumpClient: Client,
+    destinationHost: string,
+    destinationPort: number,
+    key: string,
+  ): Promise<NodeJS.ReadWriteStream> {
+    return new Promise((resolve, reject) => {
+      jumpClient.forwardOut(
+        "127.0.0.1",
+        0,
+        destinationHost,
+        destinationPort,
+        (err, stream) => {
+          if (err) {
+            reject(
+              new ToolError(
+                "SSH_CONNECTION_FAILED",
+                `Failed to open jump tunnel for [${key}] to ${destinationHost}:${destinationPort}: ${err.message}`,
+                true,
+              ),
+            );
+            return;
+          }
+          resolve(stream);
+        },
+      );
     });
   }
 
@@ -711,6 +819,12 @@ export class SSHConnectionManager {
         client.end();
       }
       this.clients.clear();
+    }
+    if (this.jumpClients.size > 0) {
+      for (const jumpClient of this.jumpClients.values()) {
+        jumpClient.end();
+      }
+      this.jumpClients.clear();
     }
 
     this.connected.clear();
