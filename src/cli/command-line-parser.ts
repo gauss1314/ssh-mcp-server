@@ -1,5 +1,10 @@
 import { parseArgs } from "node:util";
-import { SSHConfig, SshConnectionConfigMap, ParsedArgs } from "../models/types.js";
+import {
+  SSHConfig,
+  SSHHopConfig,
+  SshConnectionConfigMap,
+  ParsedArgs,
+} from "../models/types.js";
 import fs from "fs";
 import path from "path";
 import { lookupSshConfig } from "../utils/ssh-config-parser.js";
@@ -49,6 +54,13 @@ export class CommandLineParser {
         blacklist: { type: "string", short: "B" },
         socksProxy: { type: "string", short: "s" },
         "allowed-local-paths": { type: "string" },
+        "jump-host": { type: "string" },
+        "jump-port": { type: "string" },
+        "jump-username": { type: "string" },
+        "jump-password": { type: "string" },
+        "jump-privateKey": { type: "string" },
+        "jump-passphrase": { type: "string" },
+        "jump-agent": { type: "string" },
         pty: { type: "boolean" },
         "pre-connect": { type: "boolean" },
       },
@@ -152,6 +164,7 @@ export class CommandLineParser {
       const blacklist = values.blacklist;
       const allowedLocalPaths = values["allowed-local-paths"];
       const pty = values.pty;
+      const jumpHost = this.parseJumpHostFromCli(values);
 
       // 实际连接地址：优先使用 SSH config 的 HostName
       const actualHost = sshConfigEntry?.hostName || host;
@@ -178,6 +191,7 @@ export class CommandLineParser {
         agent: values.agent,
         socksProxy: values.socksProxy,
         pty: pty !== undefined ? pty : undefined,
+        jumpHost,
         commandWhitelist: whitelist
           ? whitelist
               .split(",")
@@ -286,6 +300,7 @@ export class CommandLineParser {
       privateKey: config.privateKey,
       passphrase: config.passphrase || process.env.SSH_MCP_PASSPHRASE,
       agent: config.agent,
+      jumpHost: this.normalizeJumpHost(config.jumpHost),
       socksProxy: config.socksProxy,
       pty: this.parseBoolean(config.pty),
       commandWhitelist: Array.isArray(config.commandWhitelist)
@@ -312,5 +327,66 @@ export class CommandLineParser {
               .filter(Boolean)
           : undefined,
     };
+  }
+
+  private static normalizeJumpHost(rawJumpHost: unknown): SSHHopConfig | undefined {
+    if (!rawJumpHost || typeof rawJumpHost !== "object") {
+      return undefined;
+    }
+
+    const jumpHost = rawJumpHost as Record<string, unknown>;
+    const port = typeof jumpHost.port === "number"
+      ? jumpHost.port
+      : parseInt(String(jumpHost.port), 10);
+
+    if (!jumpHost.host || !jumpHost.port || !jumpHost.username && !jumpHost.user) {
+      throw new Error("jumpHost must include host, port and username");
+    }
+    if (isNaN(port)) {
+      throw new Error(`jumpHost.port must be a valid number, got: ${String(jumpHost.port)}`);
+    }
+
+    const normalized: SSHHopConfig = {
+      host: String(jumpHost.host),
+      port,
+      username: String(jumpHost.username || jumpHost.user),
+      password: jumpHost.password ? String(jumpHost.password) : undefined,
+      privateKey: jumpHost.privateKey ? String(jumpHost.privateKey) : undefined,
+      passphrase: jumpHost.passphrase
+        ? String(jumpHost.passphrase)
+        : process.env.SSH_MCP_PASSPHRASE,
+      agent: jumpHost.agent ? String(jumpHost.agent) : undefined,
+    };
+
+    if (!normalized.password && !normalized.privateKey && !normalized.agent) {
+      throw new Error(
+        "jumpHost must include one authentication method: password, privateKey or agent",
+      );
+    }
+
+    return normalized;
+  }
+
+  private static parseJumpHostFromCli(values: Record<string, unknown>): SSHHopConfig | undefined {
+    const jumpHost = values["jump-host"];
+    if (!jumpHost) {
+      return undefined;
+    }
+
+    const jumpPort = values["jump-port"];
+    const jumpUsername = values["jump-username"];
+    if (!jumpPort || !jumpUsername) {
+      throw new Error("jump host requires --jump-port and --jump-username");
+    }
+
+    return this.normalizeJumpHost({
+      host: jumpHost,
+      port: jumpPort,
+      username: jumpUsername,
+      password: values["jump-password"],
+      privateKey: values["jump-privateKey"],
+      passphrase: values["jump-passphrase"] || process.env.SSH_MCP_PASSPHRASE,
+      agent: values["jump-agent"],
+    });
   }
 }

@@ -60,6 +60,13 @@ NPM: [https://www.npmjs.com/package/@fangjunjie/ssh-mcp-server](https://www.npmj
   -W, --whitelist     命令白名单，以逗号分隔的正则表达式
   -B, --blacklist     命令黑名单,以逗号分隔的正则表达式
   -s, --socksProxy    SOCKS 代理地址 (e.g., socks://user:password@host:port)
+  --jump-host         跳板机主机地址
+  --jump-port         跳板机端口
+  --jump-username     跳板机用户名
+  --jump-password     跳板机密码
+  --jump-privateKey   跳板机私钥文件路径
+  --jump-passphrase   跳板机私钥密码（如果有）
+  --jump-agent        跳板机 SSH Agent
   --allowed-local-paths upload/download 允许访问的额外本地路径，逗号分隔
   --pty               为命令执行分配伪终端 (默认: true)
   --pre-connect       启动时预连接所有配置的 SSH 服务器
@@ -190,6 +197,30 @@ Host myserver
         "--username", "root",
         "--password", "pwd123456",
         "--socksProxy", "socks://username:password@proxy-host:proxy-port"
+      ]
+    }
+  }
+}
+```
+
+#### 🪜 通过跳板机连接目标节点
+
+```json
+{
+  "mcpServers": {
+    "ssh-mcp-server": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@fangjunjie/ssh-mcp-server",
+        "--host", "172.16.10.25",
+        "--port", "22",
+        "--username", "spark",
+        "--password", "target-password",
+        "--jump-host", "10.0.0.5",
+        "--jump-port", "22",
+        "--jump-username", "bastion",
+        "--jump-password", "bastion-password"
       ]
     }
   }

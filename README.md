@@ -66,6 +66,13 @@ Options:
   -W, --whitelist     Command whitelist, comma-separated regular expressions
   -B, --blacklist     Command blacklist, comma-separated regular expressions
   -s, --socksProxy    SOCKS proxy server address (e.g., socks://user:password@host:port)
+  --jump-host         Jump host address
+  --jump-port         Jump host port
+  --jump-username     Jump host username
+  --jump-password     Jump host password
+  --jump-privateKey   Jump host private key file path
+  --jump-passphrase   Jump host private key passphrase (if any)
+  --jump-agent        Jump host SSH agent
   --allowed-local-paths Additional allowed local paths for upload/download, comma-separated
   --pty               Allocate pseudo-tty for command execution (default: true)
   --pre-connect       Pre-connect to all configured SSH servers on startup
@@ -202,6 +209,30 @@ You can also specify a custom SSH config file path:
   }
 }
 
+```
+
+#### 🪜 Connecting Through a Jump Host
+
+```json
+{
+  "mcpServers": {
+    "ssh-mcp-server": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@fangjunjie/ssh-mcp-server",
+        "--host", "172.16.10.25",
+        "--port", "22",
+        "--username", "spark",
+        "--password", "target-password",
+        "--jump-host", "10.0.0.5",
+        "--jump-port", "22",
+        "--jump-username", "bastion",
+        "--jump-password", "bastion-password"
+      ]
+    }
+  }
+}
 ```
 
 #### 📝 Using Command Whitelist and Blacklist

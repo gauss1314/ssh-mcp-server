@@ -1,8 +1,7 @@
 /**
  * SSH connection configuration interface
  */
-export interface SSHConfig {
-  name?: string; // Connection name, optional, compatible with single connection
+export interface SSHHopConfig {
   host: string;
   port: number;
   username: string;
@@ -10,6 +9,11 @@ export interface SSHConfig {
   privateKey?: string;
   passphrase?: string;
   agent?: string; // SSH agent for authentication (use 'pageant' for Windows Pageant)
+}
+
+export interface SSHConfig extends SSHHopConfig {
+  name?: string; // Connection name, optional, compatible with single connection
+  jumpHost?: SSHHopConfig; // Optional jump host (bastion) for chained SSH connection
   commandWhitelist?: string[]; // Command whitelist (array of regex strings)
   commandBlacklist?: string[]; // Command blacklist (array of regex strings)
   socksProxy?: string; // SOCKS proxy URL, e.g. 'socks://user:pass@host:port'
